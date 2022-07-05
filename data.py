@@ -1,3 +1,5 @@
+import os
+
 from torch.utils.data import Dataset, DataLoader, Sampler
 from scipy.ndimage import gaussian_filter, affine_transform
 from PIL import Image
@@ -5,6 +7,8 @@ from torchvision.transforms import Normalize, RandomAffine, RandomHorizontalFlip
 import numpy as np, torch, json
 from pathlib import Path
 from utils import reorganize_annotations_by_filename
+import torchvision.transforms as tfms
+import matplotlib.pyplot as plt
 
 IMAGENET_VID_DIMS = dict(
     image = (255, 255, 3),
@@ -17,7 +21,8 @@ DATA_MAP = {'a': 'ILSVRC2015_VID_train_0000',
             'd': 'ILSVRC2015_VID_train_0003',
             'e': 'val'}
 
-DATA_ROOT = './dataset/Imagenet_Video_2015/ILSVRC2015/crop_255_exemplar_63_context_0.1/'
+# DATA_ROOT = './dataset/Imagenet_Video_2015/ILSVRC2015/crop_255_exemplar_63_context_0.1/'
+DATA_ROOT = "/media/cwei/WD_BLACK/datasets/ILSVRC2015_crops/"
 
 IMAGENET_STATS = dict(mean = (0.485, 0.456, 0.406),
                       std = (0.229, 0.224, 0.225))
@@ -49,6 +54,7 @@ class ImagenetVidDatatset(Dataset):
         self.patch_tfms = patch_tfms if self.patch_augment else generic_tfms
         self.imagenet_norm = imagenet_norm
         self.data_inds = {ii: list(range(len(dd))) for ii, dd in enumerate(self.data)}
+        print(f"initialized {mode} dataset")
 
     def __len__(self):
         return len(self.data)
@@ -57,13 +63,21 @@ class ImagenetVidDatatset(Dataset):
         return int(np.sum([len(d) for d in self.data]))
 
     def __getitem__(self, index):
+        index = int(index)
         if self.mode == 'train':
+            # first select a random (vid,obj) pair from each class
             input_obj = np.random.choice(self.data[index])
+            # input_obj = self.data[index][0]
         elif self.mode == 'valid':
-            sub_index = self.data_inds[index][0]
-            self.data_inds[index] = self.data_inds[index][1:]
-            input_obj = self.data[index][sub_index]
-
+            # sub_index = self.data_inds[index][0]
+            # self.data_inds[index] = self.data_inds[index][1:]
+            # input_obj = self.data[index][sub_index]
+            # sub_index = self.data_inds[index][0]
+            # if len(self.data_inds[index]) > 1:
+            #     self.data_inds[index] = self.data_inds[index][1:]
+            # input_obj = self.data[index][sub_index]
+            input_obj = np.random.choice(self.data[index])
+        # video_dir: video directory; object_id: class id; frames: video frames.
         _video_dir, object_id, frames = Path(input_obj[0]), input_obj[1], input_obj[2]
         video_dir = Path(self.root) / DATA_MAP[str(_video_dir.parent)] / _video_dir.name
 
@@ -88,9 +102,9 @@ class ImagenetVidDatatset(Dataset):
             output_map = self.output[:, :, 1]
             match = False
 
-        input_fn = video_dir / f'{frame_in:06}.{object_id:02}.x.jpg'
+        input_fn = video_dir / f'{frame_in:06}.{object_id:02}.crop.x.jpg'
         patch_dir = Path(self.root) / DATA_MAP[str(_patch_dir.parent)] / _patch_dir.name
-        patch_fn = patch_dir / f"{frame_ex:06}.{patch_object_id:02}.{'x' if self.patch_augment else 'z'}.jpg"
+        patch_fn = patch_dir / f"{frame_ex:06}.{patch_object_id:02}.crop.{'x' if self.patch_augment else 'z'}.jpg"
 
         img_input = Image.open(input_fn)
         img_patch = Image.open(patch_fn)
@@ -211,3 +225,18 @@ class DOTADataset(Dataset):
                   'patch_category': patch_cat}
     
         return output
+
+
+def test_imagenet_vid():
+    ds = ImagenetVidDatatset(
+        data_root="/media/cwei/WD_BLACK/datasets/ILSVRC2015_crops/",
+        data_meta_dir="./datasets/meta/",
+        mode="train")
+    out = ds[0]
+    plt.imshow(out['output_map'].squeeze(axis=0))
+
+
+if __name__ == "__main__":
+    # os.environ["CUDA_VISIBLE_DEVICES"] = ""  # disable GPU
+    test_imagenet_vid()
+

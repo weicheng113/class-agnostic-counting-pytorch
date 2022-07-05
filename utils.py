@@ -10,4 +10,4 @@ def reorganize_annotations_by_filename(file):
         filename = filename_by_image_id[a['image_id']]
         annotations_by_filename[filename].append(a)
 
-    return annotations_by_filename 
+    return annotations_by_filename

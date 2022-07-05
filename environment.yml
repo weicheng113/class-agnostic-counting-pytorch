@@ -1,0 +1,9 @@
+name: cacounting-pytorch
+channels:
+  - defaults
+dependencies:
+- pip=21.0.1
+- python=3.9
+- pip:
+  - --requirement requirements.txt
+
