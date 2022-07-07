@@ -3,6 +3,8 @@ imagenet_vid/
 /logs
 /.idea
 /*.iml
+/**/*.h5
+/**/*.pt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -10,12 +10,12 @@ class Bottleneck(nn.Module):
     def __init__(self, inplanes, chans, kernel_size=3, stride=1,  expansion=4, downsample=False):
         super(Bottleneck, self).__init__()
         planes = [chans, chans, chans * expansion]
-        self.conv1 = nn.Conv2d(inplanes, planes[0], kernel_size=1, stride=stride, bias=False)
+        self.conv1 = nn.Conv2d(inplanes, planes[0], kernel_size=1, stride=stride, bias=True)
         self.bn1 = nn.BatchNorm2d(planes[0])
+        self.conv2 = nn.Conv2d(planes[0], planes[1], kernel_size=kernel_size, padding=(kernel_size-1)//2, bias=True)
         self.adapt = nn.Conv2d(planes[0], planes[1], kernel_size=1)
-        self.conv2 = nn.Conv2d(planes[0], planes[1], kernel_size=kernel_size, padding=(kernel_size-1)//2, bias=False)
         self.bn2 = nn.BatchNorm2d(planes[1])
-        self.conv3 = nn.Conv2d(planes[1], planes[2], kernel_size=1, bias=False)
+        self.conv3 = nn.Conv2d(planes[1], planes[2], kernel_size=1, bias=True)
         self.bn3 = nn.BatchNorm2d(planes[2])
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
@@ -28,7 +28,7 @@ class Bottleneck(nn.Module):
                 nn.init.orthogonal_(m.weight, gain=0.1)
 
         if downsample:
-            self.downsample = nn.Sequential(nn.Conv2d(inplanes, planes[-1], kernel_size=1, stride=stride, bias=False),
+            self.downsample = nn.Sequential(nn.Conv2d(inplanes, planes[-1], kernel_size=1, stride=stride, bias=True),
                                           nn.BatchNorm2d(planes[-1]))
 
     def forward(self, x):
@@ -60,7 +60,7 @@ class ResNet50_Half(nn.Module):
     def __init__(self, in_chans=3, layers=[3, 4], chans=[64, 128], strides=[1, 2], expansion=4):
         super(ResNet50_Half, self).__init__()
         self.block = Bottleneck
-        self.conv1 = nn.Conv2d(in_chans, chans[0], kernel_size=7, stride=2, padding=3, bias=False)
+        self.conv1 = nn.Conv2d(in_chans, chans[0], kernel_size=7, stride=2, padding=3, bias=True)
         self.bn1 = nn.BatchNorm2d(chans[0])
         self.relu = nn.ReLU(inplace=True)
         self.pool = nn.MaxPool2d(3, stride=2, padding=1)
@@ -112,8 +112,8 @@ class Relation_Module(nn.Module):
     def __init__(self, in_planes, out_planes=256):
         super(Relation_Module, self).__init__()
 
-        self.conv1 = conv_block(in_planes, out_planes, ks=3, padding=1, act_fn='relu')
-        self.convT = conv_block(out_planes, out_planes, ks=3, stride=2, padding=1, convT=True, output_padding=1)
+        self.conv1 = conv_block(in_planes, out_planes, ks=3, bias=True, padding=1, act_fn='relu')
+        self.convT = conv_block(out_planes, out_planes, ks=3, stride=2, padding=1, bias=True, convT=True, output_padding=1)
 
     def forward(self, x):
         x = self.conv1(x)
@@ -171,17 +171,18 @@ class Generic_Matching_Net(nn.Module):
             res50 = resnet50(pretrained=True)
             self.encoder_patch.load_state_dict(res50.state_dict(), strict=False)
             self.encoder_image.load_state_dict(res50.state_dict(), strict=False)
-
         self.encoder_patch = nn.Sequential(self.encoder_patch, nn.AdaptiveAvgPool2d(1))
         self.l2_norm1 = L2_Normalization(config['l2norm']['scale'])
         self.l2_norm2 = L2_Normalization(config['l2norm']['scale'])
         in_planes = config['encoder']['chans'][-1] * config['encoder']['expansion'] * 2
         self.matching = Relation_Module(in_planes, config['relation']['planes'])
-        self.prediction = conv_block(config['relation']['planes'], 1, ks=3, padding=1, bn=False, act_fn='relu')
+        self.prediction = conv_block(nfin=config['relation']['planes'], nfout=1, ks=3, bias=True, padding=1, bn=False, act_fn='relu')
 
     def forward(self, x):
-        image, exemplar = x 
+        image, exemplar = x
         F_image = self.l2_norm1(self.encoder_image(image))
+        # patchnet = self.encoder_patch[0]
+        # exemplar_tmp = patchnet(exemplar)
         F_exemplar = self.l2_norm2(self.encoder_patch(exemplar))
         F_exemplar = F_exemplar.expand_as(F_image).clone()
         F = torch.cat((F_image, F_exemplar), dim=1)
