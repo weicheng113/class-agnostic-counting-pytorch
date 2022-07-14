@@ -20,12 +20,14 @@ class LRLogger(Callback):
                 tensorboard.add_scalar(f"LR/{LRs[ll]}/{name}", slr, step)
 
     def on_batch_end(self, runner: IRunner):
+        # print("on_batch_end")
         # every train loader
         if not runner.is_train_loader:
             return
         self._throw_on_tensorboard(runner, runner.epoch_step, 'batch')
 
     def on_epoch_end(self, runner: IRunner):
+        # print("on_epoch_end")
         if not runner.is_train_loader:
             return
 

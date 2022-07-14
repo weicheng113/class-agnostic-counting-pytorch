@@ -1,8 +1,9 @@
-import torch, numpy as np, torch.nn as nn
-from pathlib import Path
+import gc
+
+import torch, torch.nn as nn
 from collections import OrderedDict
 
-
+from torch.nn import BatchNorm2d
 
 
 class Bottleneck(nn.Module):
@@ -25,7 +26,8 @@ class Bottleneck(nn.Module):
         for m in self.adapt.modules():
             if isinstance(m, nn.Conv2d):
                 #print(m.weight.shape, m.weight.ndimension())
-                nn.init.orthogonal_(m.weight, gain=0.1)
+                # nn.init.orthogonal_(m.weight, gain=0.1)
+                nn.init.uniform_(m.weight)
 
         if downsample:
             self.downsample = nn.Sequential(nn.Conv2d(inplanes, planes[-1], kernel_size=1, stride=stride, bias=True),
@@ -55,7 +57,6 @@ class Bottleneck(nn.Module):
         return out
 
 
-
 class ResNet50_Half(nn.Module):
     def __init__(self, in_chans=3, layers=[3, 4], chans=[64, 128], strides=[1, 2], expansion=4):
         super(ResNet50_Half, self).__init__()
@@ -83,8 +84,11 @@ class ResNet50_Half(nn.Module):
         x = self.relu(x)
         x = self.pool(x)
 
+        # print(f"start layer1: {len(gc.get_objects())}")
         x = self.layer1(x)
+        # print(f"end layer1: {len(gc.get_objects())}")
         x = self.layer2(x)
+        # print(f"end layer2: {len(gc.get_objects())}")
 
         return x
 
@@ -115,9 +119,9 @@ class Relation_Module(nn.Module):
         self.conv1 = conv_block(in_planes, out_planes, ks=3, bias=True, padding=1, act_fn='relu')
         self.convT = conv_block(out_planes, out_planes, ks=3, stride=2, padding=1, bias=True, convT=True, output_padding=1)
 
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.convT(x)
+    def forward(self, x): # x(batch_size, dim=1024, height=32, width=32) - concatenated image and patch feature.
+        x = self.conv1(x) # x(batch_size, dim=256, height=32, width=32)
+        x = self.convT(x) # x(batch_size, dim=256, height=64, width=64)
 
         return x
 
@@ -179,16 +183,49 @@ class Generic_Matching_Net(nn.Module):
         self.prediction = conv_block(nfin=config['relation']['planes'], nfout=1, ks=3, bias=True, padding=1, bn=False, act_fn='relu')
 
     def forward(self, x):
-        image, exemplar = x
-        F_image = self.l2_norm1(self.encoder_image(image))
+        image, exemplar = x  # image(batch_size, channels=3, height=255, width=255); exemplar(batch_size, channels=3, height=63, width=63)
+        F_image = self.l2_norm1(self.encoder_image(image))  # F_image(batch_size, dim=512, height=32, width=32)
         # patchnet = self.encoder_patch[0]
         # exemplar_tmp = patchnet(exemplar)
-        F_exemplar = self.l2_norm2(self.encoder_patch(exemplar))
-        F_exemplar = F_exemplar.expand_as(F_image).clone()
-        F = torch.cat((F_image, F_exemplar), dim=1)
+        F_exemplar = self.l2_norm2(self.encoder_patch(exemplar)) # F_exemplar(batch_size, dim=512, height=1, width=1)
+        F_exemplar = F_exemplar.expand_as(F_image).clone() # F_exemplar(batch_size, dim=512, height=32, width=32)
+        F = torch.cat((F_image, F_exemplar), dim=1) # F(batch_size, dim=1024, height=32, width=32)
 
-        out = self.matching(F)
-        out = self.prediction(out)
+        out = self.matching(F) # F(batch_size, dim=256, height=64, width=64)
+        out = self.prediction(out) # F(batch_size, dim=1, height=64, width=64)
 
         return {'logits': out}
+
+    def to_adapting_mode(self):
+        self.freeze_modules(list(self.modules()))
+        modules_to_unfreeze = dict()
+        for name, module in self.named_modules():
+            if (isinstance(module, BatchNorm2d) or
+                    isinstance(module, L2_Normalization) or
+                    name.endswith(".adapt")):
+                modules_to_unfreeze[name] = module
+        self.unfreeze_modules(list(modules_to_unfreeze.values()))
+        return self
+
+    def to_train_mode(self):
+        modules_to_freeze = dict()
+        for name, module in self.named_modules():
+            if name.endswith(".adapt"):
+                modules_to_freeze[name] = module
+        self.freeze_modules(list(modules_to_freeze.values()))
+        return self
+
+    @classmethod
+    def freeze_modules(cls, modules: list[nn.Module]):
+        for module in modules:
+            for param in module.parameters(recurse=False):
+                param.requires_grad = False
+
+    @classmethod
+    def unfreeze_modules(cls, modules: list[nn.Module]):
+        for module in modules:
+            for param in module.parameters(recurse=False):
+                param.requires_grad = True
+
+
 

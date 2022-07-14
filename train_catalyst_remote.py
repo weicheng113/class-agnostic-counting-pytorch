@@ -6,7 +6,7 @@ from catalyst.runners import SupervisedRunner
 from torch.utils.data import RandomSampler, BatchSampler, DataLoader
 
 from center_weighted_mse_loss import CenterWeightedMSELoss
-from data import ImagenetVidDatatset, collate_fn
+from data import ImagenetVidDatatset, collate_fn, ValidSampler
 from lr_logger import LRLogger
 from model import Generic_Matching_Net, config
 from catalyst import dl
@@ -16,26 +16,35 @@ from train_catalyst import get_optimizer, get_lr_schedule
 
 def main():
     BS = 64
-    EPOCHS = 25
-    nw = 8
+    # EPOCHS = 25
+    EPOCHS = 36
+    nw = 4
+    steps_per_epoch = 300
+    validation_steps = 50
     # nw = 0
-    trn_ds = ImagenetVidDatatset(data_meta_dir="./datasets/meta/", mode="train")
+    trn_ds = ImagenetVidDatatset(
+        data_root="/home/ubuntu/datasets/ILSVRC2015_crops/Data/VID/train",
+        data_meta_dir="./datasets/meta/", mode="train")
     trn_sampler = RandomSampler(
         data_source=trn_ds,
+        num_samples=BS*steps_per_epoch,
         # num_samples=trn_ds.len_total(),
-        num_samples=BS*2,
+        # num_samples=BS*2,
         replacement=True)
     trn_batch_sampler = BatchSampler(trn_sampler, batch_size=BS, drop_last=False)
     trn_dl = DataLoader(trn_ds, batch_sampler=trn_batch_sampler, collate_fn=collate_fn, num_workers=nw)
 
-    val_ds = ImagenetVidDatatset(mode='valid', data_meta_dir="./datasets/meta/", patch_augment=False)
+    val_ds = ImagenetVidDatatset(
+        data_root="/home/ubuntu/datasets/ILSVRC2015_crops/Data/VID/train",
+        mode='valid', data_meta_dir="./datasets/meta/", patch_augment=False)
     # val_sampler = ValidSamplerSubset(
     #     data_source=val_ds,
     #     num_samples=100
     # )
     val_sampler = RandomSampler(
         data_source=val_ds,
-        num_samples=BS*2,
+        num_samples=BS*validation_steps,
+        # num_samples=BS*2,
         replacement=True)
     # val_sampler = ValidSampler(val_ds)
     val_batch_sampler = BatchSampler(val_sampler, batch_size=BS, drop_last=False)
@@ -63,8 +72,12 @@ def main():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = Generic_Matching_Net(config=config)
+    model = model.to_train_mode()
     optimizer = get_optimizer(optimizer_config, model)
     lr_scheduler = get_lr_schedule(onecycle_lr_config, optimizer)
+    early_stopping = dl.EarlyStoppingCallback(
+        patience=5, loader_key="valid", metric_key="loss", minimize=True
+    )
 
     runner = SupervisedRunner(
         # device=device,
@@ -79,12 +92,12 @@ def main():
                  loaders=dataloaders,
                  logdir='./runs/',
                  loggers={"tensorboard": dl.TensorboardLogger(logdir="./logs/tensorboard")},
-                 callbacks=[SchedulerCallback(mode='batch'), LRLogger()],
+                 callbacks=[SchedulerCallback(mode='batch'), LRLogger(), early_stopping],
                  scheduler=lr_scheduler,
                  num_epochs=EPOCHS,
-                 verbose=False)
+                 verbose=True)
 
 
 if __name__ == "__main__":
-    # os.environ["CUDA_VISIBLE_DEVICES"] = ""  # disable GPU
+    # watch -n 0.5 nvidia-smi
     main()

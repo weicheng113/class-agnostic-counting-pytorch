@@ -1,5 +1,9 @@
+import gc
 import os
+from random import random
 
+import scipy
+import skimage
 from torch.utils.data import Dataset, DataLoader, Sampler
 from scipy.ndimage import gaussian_filter, affine_transform
 from PIL import Image
@@ -225,6 +229,150 @@ class DOTADataset(Dataset):
                   'patch_category': patch_cat}
     
         return output
+
+
+class CarPKDataset(Dataset):
+    def __init__(self, data_root, data_meta_dir, mode='train'):
+        self.data_root = data_root
+        with np.load(file=os.path.join(data_meta_dir, "car.npz")) as data:
+            if mode == "train":
+                self.image_paths = data["trn_lst"]
+                self.dot_paths = data["trn_lb"]
+            elif mode == "valid":
+                self.image_paths = data["val_lst"]
+                self.dot_paths = data["val_lb"]
+            else:
+                raise Exception(f"unknown mode {mode}")
+        self.tfms = generic_tfms
+        self.patch_tfms = patch_tfms
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, index):
+        image_path = self.image_paths[index]
+        dot_path = self.dot_paths[index]
+        img_input = Image.open(fp=os.path.join(self.data_root, image_path))
+        imgdims = (360, 640, 3)
+        img_input = img_input.resize((imgdims[1], imgdims[0]), resample=Image.BILINEAR)
+        dot_label = self.load_dot_label(dot_image_path=os.path.join(self.data_root, dot_path))
+        ex_patch, output_map = self.sample_exemplar(inputs=(np.array(img_input), dot_label), patchdims=(64, 64, 3), augment=True)
+
+        img_input_tensor = self.tfms(img_input)
+        img_patch_tensor = self.patch_tfms(Image.fromarray(ex_patch))
+
+        output = {'search_img': img_input_tensor,
+                  'patch_img': img_patch_tensor,
+                  'output_map': torch.as_tensor(output_map, dtype=torch.float)[None],
+                  'match': torch.as_tensor(True, dtype=torch.float),
+                  "search_img_path": os.path.join(self.data_root, image_path)
+                  }
+        return output
+
+    def load_dot_label(self, dot_image_path):
+        imgdims = (360, 640, 3)
+        lb = np.array(Image.open(dot_image_path).convert(mode='RGB'))
+
+        # resize dot labels
+        lb = np.asarray(lb[:, :, 0] > 230)
+        coords = np.column_stack(np.where(lb == 1))
+        new_lb = np.zeros((imgdims[0], imgdims[1]), dtype='float32')
+
+        x_scaling = imgdims[0]/lb.shape[0]
+        y_scaling = imgdims[1]/lb.shape[1]
+
+        for c in range(coords.shape[0]):
+            new_lb[int(coords[c, 0]*x_scaling), int(coords[c, 1]*y_scaling)] = 1
+
+        return new_lb
+
+    def sample_exemplar(self, inputs, patchdims, augment):
+        img, lb = inputs
+        imgdims = img.shape
+
+        # get coordinates of potential exemplars
+        coords = np.column_stack(np.where(lb == 1.0))
+        valid_coords = np.array([c for c in coords
+                                 if (c[0] > patchdims[0]//2) and c[1] > (patchdims[1]//2)
+                                 and c[0] < (imgdims[0] - patchdims[0]//2)
+                                 and c[1] < (imgdims[1] - patchdims[1]//2)])
+
+        if valid_coords.shape[0] == 0:
+            # TODO: different way of handling this case
+            # no objects, so choose patch at center of image to match to itself
+            valid_coords = np.array([[imgdims[0] // 2, imgdims[1] // 2]], 'int')
+            lb[:] = 0
+            lb[valid_coords[0][0], valid_coords[0][1]] = 1
+        # try:
+        patch_coords = valid_coords[np.random.randint(0, valid_coords.shape[0])]
+        ex_patch = img[patch_coords[0] - patchdims[0] // 2: patch_coords[0] + patchdims[0] // 2,
+                   patch_coords[1] - patchdims[1] // 2: patch_coords[1] + patchdims[1] // 2, ]
+
+        output_map = self.max_pooling(lb, (4, 4))  # resize to output size
+        output_map = 100 * scipy.ndimage.gaussian_filter(
+            output_map, sigma=(2, 2), mode='constant')
+        # except ValueError as ex:
+        #     raise ex
+
+        # if augment:
+        #     opt = {'xy': -0.05, 'rt': [1, 20], 'zm': [0.9, 1.1]}
+        #     ex_patch = self.augment_data(ex_patch, opt)
+        return (ex_patch, output_map)
+
+    @classmethod
+    def max_pooling(cls, img, stride=(2, 2)):
+        return skimage.measure.block_reduce(img, block_size=stride, func=np.max)
+
+    # @classmethod
+    # def augment_data(cls, img, opt={}, prob=.9):
+    #     xy = opt.get('xy', -0.03)
+    #     rt = opt.get('rt', [8, 20])
+    #     zm = opt.get('zm', [.95, 1.05])
+    #
+    #     if np.random.random() > .5:
+    #         img = cls.flip_axis(img, 1)
+    #
+    #     if np.random.random() < prob:
+    #         rand_xy = xy * np.random.random((2,))
+    #         rand_rt = np.pi / np.random.randint(rt[0], rt[1])
+    #         rand_zm = np.random.uniform(zm[0], zm[1])
+    #         target_shape = np.array(img.shape)
+    #
+    #         img = cls.affine_image_with_python(img, target_shape, xy=rand_xy, rt=rand_rt, zm=rand_zm)
+    #     return img
+    #
+    # @classmethod
+    # def flip_axis(cls, array, axis):
+    #     # Rearrange the array so that the axis of interest is first.
+    #     array = np.asarray(array).swapaxes(axis, 0)
+    #     # Reverse the elements along the first axis.
+    #     array = array[::-1, ...]
+    #     # Put the array back and return.
+    #     return array.swapaxes(0, axis)
+    #
+    # @classmethod
+    # def affine_image_with_python(cls, img, target_shape=None, xy=np.array([0.0, 0.0]), rt=0.0, zm=1.0):
+    #     # This is specifically designed for the stn face project.
+    #     xy_mat = np.array([1.0, 1.0, 1.0, 1.0])
+    #     rt_mat = np.array([np.cos(rt), np.sin(rt), -np.sin(rt), np.cos(rt)])
+    #     zm_mat = np.array([zm, zm, zm, zm])
+    #     transform_mat = np.reshape((xy_mat * rt_mat) * zm_mat, (2, 2))
+    #     c_in = 0.5*np.array(img.shape[:2])
+    #     c_out = c_in
+    #     offset = c_in - c_out.dot(transform_mat)
+    #     trans_img_c0 = cls.affine_transform_Image(img[:, :, 0], transform_mat.T, offset=offset+xy*(target_shape[:2]//2))
+    #     trans_img_c1 = cls.affine_transform_Image(img[:, :, 1], transform_mat.T, offset=offset+xy*(target_shape[:2]//2))
+    #     trans_img_c2 = cls.affine_transform_Image(img[:, :, 2], transform_mat.T, offset=offset+xy*(target_shape[:2]//2))
+    #     trans_img = np.stack((trans_img_c0, trans_img_c1, trans_img_c2), -1)
+    #     return trans_img
+    #
+    # @classmethod
+    # def affine_transform_Image(cls, img, matrix, offset):
+    #     #padX = [img.shape[1] - pivot[0], pivot[0]]
+    #     #padY = [img.shape[0] - pivot[1], pivot[1]]
+    #     #imgP = np.pad(img, [padY, padX, [0,0]], 'reflect')
+    #     imgR = scipy.ndimage.affine_transform(img, matrix, offset=offset, mode='nearest', order=5)
+    #     return imgR
 
 
 def test_imagenet_vid():

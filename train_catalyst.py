@@ -3,6 +3,10 @@ from collections import defaultdict
 from torch.optim.lr_scheduler import LambdaLR, OneCycleLR, ReduceLROnPlateau
 
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
 def get_optimizer(config, model,):
     from functools import partial
     from torch.optim import Adam, AdamW, SGD
@@ -19,7 +23,7 @@ def get_optimizer(config, model,):
 
     for name, param in model.named_parameters():
         if 'adapt' in name:
-            param.requires_grad = bool(adapt_params['lr'])
+            # param.requires_grad = bool(adapt_params['lr'])
             adapt_params['params'].append(param)
             #adapt_params['names'].append(name)
         else:
@@ -27,6 +31,7 @@ def get_optimizer(config, model,):
             #main_params['names'].append(name)
 
     optimizer = OPTIMS[config['name']](params=[adapt_params, main_params])
+    # optimizer = OPTIMS[config['name']](params=model.parameters())
 
     return optimizer
 

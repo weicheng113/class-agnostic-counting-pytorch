@@ -188,8 +188,10 @@ def generate_image_crops(vid_root_path, vid_curated_path):
 
 if __name__ == "__main__":
     # path to your VID dataset
-    vid_root_path = "/media/cwei/WD_BLACK/datasets/ILSVRC2015/"
-    vid_curated_path = "/media/cwei/WD_BLACK/datasets/ILSVRC2015_crops"
+    vid_root_path = "/home/ubuntu/datasets/ILSVRC2015/"
+    vid_curated_path = "/home/ubuntu/datasets/ILSVRC2015_crops/"
+    # vid_root_path = "/media/cwei/WD_BLACK/datasets/ILSVRC2015/"
+    # vid_curated_path = "/media/cwei/WD_BLACK/datasets/ILSVRC2015_crops"
     if not os.path.exists(vid_curated_path):
         os.mkdir(vid_curated_path)
     generate_image_crops(vid_root_path, vid_curated_path)

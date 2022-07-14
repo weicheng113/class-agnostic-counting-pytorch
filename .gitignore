@@ -5,6 +5,9 @@ imagenet_vid/
 /*.iml
 /**/*.h5
 /**/*.pt
+/heatmap_vis.jpg
+/car_adapt
+/model_checkpoints
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
