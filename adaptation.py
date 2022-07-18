@@ -129,11 +129,15 @@ def main():
         valid=val_dl)
 
     optimizer_config = OrderedDict(
-        name='adam',
+        # name='adam',
+        name='adamw',
         # adapt_lr=0.0,
-        adapt_lr=2.5e-4,
-        main_lr=2.5e-4,
-        weight_decay=1e-4,
+        adapt_lr=5e-5,
+        main_lr=5e-5,
+        weight_decay=0.0,
+        # adapt_lr=2.5e-4,
+        # main_lr=2.5e-4,
+        # weight_decay=1e-4,
         momentum=0.9)
 
     #this will depend on the lr scheduler

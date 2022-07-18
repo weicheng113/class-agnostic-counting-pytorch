@@ -17,7 +17,7 @@ from train_catalyst import get_optimizer, get_lr_schedule, count_parameters
 
 def main():
     BS = 32
-    EPOCHS = 25
+    EPOCHS = 36
     nw = 4
     # nw = 0
     data_root = "/home/ubuntu/datasets/carpk/"
@@ -53,11 +53,15 @@ def main():
         valid=val_dl)
 
     optimizer_config = OrderedDict(
-        name='adam',
+        # name='adam',
+        name='adamw',
         # adapt_lr=0.0,
-        adapt_lr=2.5e-4,
-        main_lr=2.5e-4,
-        weight_decay=1e-4,
+        adapt_lr=5e-5,
+        main_lr=5e-5,
+        weight_decay=0.0,        # adapt_lr=0.0,
+        # adapt_lr=2.5e-4,
+        # main_lr=2.5e-4,
+        # weight_decay=1e-4,
         momentum=0.9)
 
     #this will depend on the lr scheduler
@@ -72,7 +76,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = Generic_Matching_Net(config=config)
     print(f"{count_parameters(model)}")
-    model = model.to_adapting_mode()
+    # model = model.to_adapting_mode()
     optimizer = get_optimizer(optimizer_config, model)
     lr_scheduler = get_lr_schedule(onecycle_lr_config, optimizer)
 

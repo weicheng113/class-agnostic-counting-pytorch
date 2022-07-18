@@ -8,6 +8,7 @@ imagenet_vid/
 /heatmap_vis.jpg
 /car_adapt
 /model_checkpoints
+/heatmap
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
